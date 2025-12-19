@@ -1,0 +1,9 @@
+# Core
+web3==7.6.0
+python-dotenv==1.0.0
+
+# Vyper compiler
+vyper==0.4.3
+
+# Utilidades
+requests==2.31.0
