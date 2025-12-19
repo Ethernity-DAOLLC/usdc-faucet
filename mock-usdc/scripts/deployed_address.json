@@ -1,0 +1,15 @@
+{
+  "network": "arbitrum-sepolia",
+  "chain_id": 421614,
+  "contract_address": "0xD36be6DF17Ceb5ac8C2FBCba9A8f62f54a5C9343",
+  "contract_name": "MockUSDC",
+  "deployer": "0xEe4A90a9d3E24cBB7b1522552717D4F379d405B2",
+  "tx_hash": "8882efa6e4a40e12162706f45d15e4216057dedf75e39baabdf8278ddf421c09",
+  "constructor_args": {
+    "_name": "Mock USDC Faucet",
+    "_symbol": "mUSDC",
+    "_decimals": 6
+  },
+  "block_number": 226005295,
+  "timestamp": 1766172697
+}

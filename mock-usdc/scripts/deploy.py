@@ -83,6 +83,14 @@ def deploy_mock_usdc():
         print(f"⚠️  No se pudo estimar gas: {e}")
         gas_estimate = 2000000
 
+    latest_block = w3.eth.get_block('latest')
+    base_fee = latest_block['baseFeePerGas']
+    max_priority_fee = w3.to_wei(0.1, 'gwei')
+    max_fee_per_gas = base_fee * 2 + max_priority_fee
+    
+    print(f"💰 Base Fee: {w3.from_wei(base_fee, 'gwei'):.2f} Gwei")
+    print(f"💰 Max Fee Per Gas: {w3.from_wei(max_fee_per_gas, 'gwei'):.2f} Gwei")
+
     transaction = contract.constructor(
         constructor_args["_name"],
         constructor_args["_symbol"],
@@ -92,7 +100,8 @@ def deploy_mock_usdc():
         'from': account.address,
         'nonce': w3.eth.get_transaction_count(account.address),
         'gas': int(gas_estimate * 1.5),
-        'gasPrice': w3.eth.gas_price,
+        'maxFeePerGas': max_fee_per_gas,
+        'maxPriorityFeePerGas': max_priority_fee,
         'value': 0
     })
 
@@ -127,7 +136,7 @@ def deploy_mock_usdc():
         with open(output_dir / "MockUSDC_ABI.json", "w") as f:
             json.dump(abi, f, indent=2)
         
-        print("📁 Detalles guardados en scripts/deployed_address.json")
+        print("📝 Detalles guardados en scripts/deployed_address.json")
         print("\n🔍 Verificando contrato...")
         contract_instance = w3.eth.contract(address=contract_address, abi=abi)
         
