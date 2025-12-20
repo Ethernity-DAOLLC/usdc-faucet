@@ -64,8 +64,8 @@ def deploy_mock_usdc():
 
     contract = w3.eth.contract(abi=abi, bytecode=bytecode)
     constructor_args = {
-        "_name": "Mock USDC Faucet",
-        "_symbol": "mUSDC", 
+        "_name": "USD Coin",
+        "_symbol": "USDC", 
         "_decimals": 6
     }
 
