@@ -141,7 +141,7 @@ async def startup():
         async with db_pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("""
-                    CREATE TABLE IF NOT EXISTS faucet_requests (
+                    CREATE TABLE IF NOT EXISTS faucet_requests_V2 (
                         id SERIAL PRIMARY KEY,
                         wallet_address VARCHAR(42) NOT NULL,
                         usdc_transaction_hash VARCHAR(66),
@@ -160,6 +160,7 @@ async def startup():
                         ip_address VARCHAR(45)
                     );
                     CREATE INDEX IF NOT EXISTS idx_wallet_address ON faucet_requests(wallet_address);
+                    CREATE INDEX IF NOT EXISTS idx_wallet_status ON faucet_requests(status);
                     CREATE INDEX IF NOT EXISTS idx_created_at ON faucet_requests(created_at);
                 """)
                 await conn.commit()
