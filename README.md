@@ -10,4 +10,4 @@ faucet-service/
 
 Deploy en Railway
 Nuevo servicio en Railway
-Nombra el servicio: usdc-faucet
+Nombre del servicio: usdc-faucet
