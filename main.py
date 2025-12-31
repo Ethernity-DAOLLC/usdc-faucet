@@ -36,16 +36,25 @@ app = FastAPI(
     version="2.0.0",
 )
 
-CORS_ORIGINS = os.getenv("BACKEND_CORS_ORIGINS", "*").split(",")
+CORS_ORIGINS = os.getenv("BACKEND_CORS_ORIGINS", "").split(",")
 CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS if origin.strip()]
+
+PRODUCTION_ORIGINS = [
+    "https://www.ethernity-dao.com",
+    "https://ethernity-dao.com",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+ALL_ORIGINS = list(set(CORS_ORIGINS + PRODUCTION_ORIGINS))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS if CORS_ORIGINS != ["*"] else ["*"],
+    allow_origins=ALL_ORIGINS if ALL_ORIGINS else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 PRIVATE_KEY = os.getenv("FAUCET_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY")
 RPC_URL = os.getenv("RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc")
@@ -133,6 +142,7 @@ async def startup():
     print(f"💰 Contract: {MOCK_USDC_ADDRESS}")
     print(f"⛽ ETH per request: {FAUCET_ETH_AMOUNT} ETH")
     print(f"🪙 USDC per request: {FAUCET_USDC_AMOUNT}")
+    print(f"🌐 CORS Origins: {ALL_ORIGINS}")
     
     if DATABASE_URL:
         db_pool = AsyncConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10, open=False)
