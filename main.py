@@ -36,20 +36,27 @@ app = FastAPI(
     version="2.0.0",
 )
 
-CORS_ORIGINS = os.getenv("BACKEND_CORS_ORIGINS", "").split(",")
-CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS if origin.strip()]
+# CORS Configuration
+CORS_ORIGINS = os.getenv("BACKEND_CORS_ORIGINS", "")
+if CORS_ORIGINS:
+    CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
+else:
+    CORS_ORIGINS = []
 
+# Production origins - always included
 PRODUCTION_ORIGINS = [
     "https://www.ethernity-dao.com",
     "https://ethernity-dao.com",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
+
+# Combine both
 ALL_ORIGINS = list(set(CORS_ORIGINS + PRODUCTION_ORIGINS))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALL_ORIGINS if ALL_ORIGINS else ["*"],
+    allow_origins=ALL_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
