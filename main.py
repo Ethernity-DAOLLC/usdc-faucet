@@ -36,22 +36,18 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# CORS Configuration
 CORS_ORIGINS = os.getenv("BACKEND_CORS_ORIGINS", "")
 if CORS_ORIGINS:
     CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
 else:
     CORS_ORIGINS = []
 
-# Production origins - always included
 PRODUCTION_ORIGINS = [
     "https://www.ethernity-dao.com",
     "https://ethernity-dao.com",
     "http://localhost:5173",
     "http://localhost:3000",
 ]
-
-# Combine both
 ALL_ORIGINS = list(set(CORS_ORIGINS + PRODUCTION_ORIGINS))
 
 app.add_middleware(
@@ -65,7 +61,7 @@ app.add_middleware(
 DATABASE_URL = os.getenv("DATABASE_URL")
 PRIVATE_KEY = os.getenv("FAUCET_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY")
 RPC_URL = os.getenv("RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc")
-MOCK_USDC_ADDRESS = os.getenv("MOCK_USDC_ADDRESS", "0x53E691B568B87f0124bb3A88C8b9958bF8396E81")
+MOCK_USDC_ADDRESS = os.getenv("MOCK_USDC_ADDRESS", "0x052B32d81177b1B86B1A709951A3c056dBF4A69d")
 FAUCET_USDC_AMOUNT = os.getenv("FAUCET_USDC_AMOUNT", "10000")
 FAUCET_ETH_AMOUNT = os.getenv("FAUCET_ETH_AMOUNT", "0.001")
 RATE_LIMIT_HOURS = int(os.getenv("RATE_LIMIT_HOURS", "24"))
@@ -290,7 +286,7 @@ async def request_tokens(request: FaucetRequest):
             eth_amount_wei = w3.to_wei(float(FAUCET_ETH_AMOUNT), 'ether')
             faucet_eth_balance = w3.eth.get_balance(faucet_account.address)
             
-            if faucet_eth_balance >= eth_amount_wei + w3.to_wei(0.0001, 'ether'):  # +gas
+            if faucet_eth_balance >= eth_amount_wei + w3.to_wei(0.0001, 'ether'): 
                 nonce = w3.eth.get_transaction_count(faucet_account.address)
                 eth_transaction = {
                     'nonce': nonce,
