@@ -20,7 +20,7 @@ app = FastAPI(
     ## Características
     
     * 🪙 Distribuye USDC tokens (10,000 por request)
-    * ⛽ Distribuye ETH para gas fees (0.001 ETH por request)
+    * ⛽ Distribuye ETH para gas fees (0.01 ETH por request)
     * ⏱️ Rate limiting: 1 request cada 24 horas por wallet
     * 📊 Tracking completo de transacciones
     * 🔍 Historial por wallet
@@ -63,7 +63,7 @@ PRIVATE_KEY = os.getenv("FAUCET_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY
 RPC_URL = os.getenv("RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc")
 MOCK_USDC_ADDRESS = os.getenv("MOCK_USDC_ADDRESS", "0x052B32d81177b1B86B1A709951A3c056dBF4A69d")
 FAUCET_USDC_AMOUNT = os.getenv("FAUCET_USDC_AMOUNT", "10000")
-FAUCET_ETH_AMOUNT = os.getenv("FAUCET_ETH_AMOUNT", "0.001")
+FAUCET_ETH_AMOUNT = os.getenv("FAUCET_ETH_AMOUNT", "0.01")
 RATE_LIMIT_HOURS = int(os.getenv("RATE_LIMIT_HOURS", "24"))
 
 if not PRIVATE_KEY:
