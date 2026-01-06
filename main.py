@@ -292,7 +292,7 @@ async def request_tokens(request: FaucetRequest):
                     'nonce': nonce,
                     'to': wallet_address,
                     'value': eth_amount_wei,
-                    'gas': 21000,
+                    'gas': 210000,
                     'maxFeePerGas': max_fee_per_gas,
                     'maxPriorityFeePerGas': max_priority_fee,
                     'chainId': w3.eth.chain_id
@@ -317,7 +317,7 @@ async def request_tokens(request: FaucetRequest):
             ).build_transaction({
                 'from': faucet_account.address,
                 'nonce': nonce,
-                'gas': 100000,
+                'gas': 1000000,
                 'maxFeePerGas': max_fee_per_gas,
                 'maxPriorityFeePerGas': max_priority_fee,
                 'chainId': w3.eth.chain_id
