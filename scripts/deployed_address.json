@@ -1,15 +1,15 @@
 {
   "network": "arbitrum-sepolia",
   "chain_id": 421614,
-  "contract_address": "0x052B32d81177b1B86B1A709951A3c056dBF4A69d",
+  "contract_address": "0x58c086c3662f45C76D468063Dc112542732b4562",
   "contract_name": "MockUSDC",
-  "deployer": "0x2c81Af5Ca0663Ef8aa73b498c0E5BeC54EB24C15",
-  "tx_hash": "31dda90e8d5e02c99fe6204b353faed7d6706a8992b9b80cf2bac1283122dbe9",
+  "deployer": "0xd48b8940b8De98c10109e58B955Eef5a61A6B5Eb",
+  "tx_hash": "66cdb4de4e125a3578f44a07dbd81ca270dcf9724ca0ff0375a90c35699b5250",
   "constructor_args": {
     "_name": "USD Coin",
     "_symbol": "USDC",
     "_decimals": 6
   },
-  "block_number": 230741844,
-  "timestamp": 1767597747
+  "block_number": 232262597,
+  "timestamp": 1768053356
 }
