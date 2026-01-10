@@ -23,7 +23,7 @@ app = FastAPI(
     * ⛽ Distribuye ETH para gas fees (0.01 ETH por request)
     * ⏱️ Rate limiting: 1 request cada 24 horas por wallet
     * 📊 Tracking completo de transacciones
-    * 🔍 Historial por wallet
+    * 📜 Historial por wallet
     
     ## Flujo de uso
     
@@ -148,37 +148,68 @@ async def startup():
     print(f"🌐 CORS Origins: {ALL_ORIGINS}")
     
     if DATABASE_URL:
-        db_pool = AsyncConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10, open=False)
-        await db_pool.open()
-        
-        async with db_pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("""
-                    CREATE TABLE IF NOT EXISTS faucet_requests (
-                        id SERIAL PRIMARY KEY,
-                        wallet_address VARCHAR(42) NOT NULL,
-                        usdc_transaction_hash VARCHAR(66),
-                        eth_transaction_hash VARCHAR(66),
-                        usdc_amount_sent DECIMAL(20, 6),
-                        eth_amount_sent DECIMAL(20, 10),
-                        current_age INT NOT NULL,
-                        retirement_age INT NOT NULL,
-                        desired_monthly_payment DECIMAL(20, 2) NOT NULL,
-                        monthly_deposit DECIMAL(20, 2) NOT NULL,
-                        initial_amount DECIMAL(20, 2) NOT NULL,
-                        status VARCHAR(20) NOT NULL,
-                        error_message TEXT,
-                        contract_type VARCHAR(20) DEFAULT 'mock',
-                        created_at TIMESTAMP DEFAULT NOW(),
-                        ip_address VARCHAR(45)
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_wallet_address ON faucet_requests(wallet_address);
-                    CREATE INDEX IF NOT EXISTS idx_wallet_status ON faucet_requests(status);
-                    CREATE INDEX IF NOT EXISTS idx_created_at ON faucet_requests(created_at);
-                """)
-                await conn.commit()
+        try:
+            db_pool = AsyncConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10, open=False)
+            await db_pool.open()
+            print("✅ Database connection pool opened")
+            
+            async with db_pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    # Crear tabla principal
+                    await cur.execute("""
+                        CREATE TABLE IF NOT EXISTS faucet_requests (
+                            id SERIAL PRIMARY KEY,
+                            wallet_address VARCHAR(42) NOT NULL,
+                            usdc_transaction_hash VARCHAR(66),
+                            eth_transaction_hash VARCHAR(66),
+                            usdc_amount_sent DECIMAL(20, 6),
+                            eth_amount_sent DECIMAL(20, 10),
+                            current_age INT NOT NULL,
+                            retirement_age INT NOT NULL,
+                            desired_monthly_payment DECIMAL(20, 2) NOT NULL,
+                            monthly_deposit DECIMAL(20, 2) NOT NULL,
+                            initial_amount DECIMAL(20, 2) NOT NULL,
+                            status VARCHAR(20) NOT NULL,
+                            error_message TEXT,
+                            contract_type VARCHAR(20) DEFAULT 'mock',
+                            created_at TIMESTAMP DEFAULT NOW(),
+                            ip_address VARCHAR(45)
+                        );
+                    """)
+                    print("✅ Table faucet_requests created/verified")
+                    
+                    # Crear índices
+                    await cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_wallet_address 
+                        ON faucet_requests(wallet_address);
+                    """)
+                    await cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_wallet_status 
+                        ON faucet_requests(status);
+                    """)
+                    await cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_created_at 
+                        ON faucet_requests(created_at);
+                    """)
+                    print("✅ Indexes created/verified")
+                    
+                    await conn.commit()
+                    print("✅ Database schema ready")
+                    
+        except Exception as e:
+            print(f"❌ Database initialization failed: {e}")
+            print("⚠️ Service will continue without database persistence")
+            db_pool = None
     else:
         print("⚠️ No DATABASE_URL - running without database")
+    
+    # Verificar conexión blockchain
+    try:
+        block_number = w3.eth.block_number
+        print(f"✅ Blockchain connected - Block: {block_number}")
+    except Exception as e:
+        print(f"❌ Blockchain connection failed: {e}")
+        raise
     
     print("✅ Service ready!")
 
@@ -186,6 +217,7 @@ async def startup():
 async def shutdown():
     if db_pool:
         await db_pool.close()
+        print("✅ Database connection pool closed")
 
 @app.get("/")
 def read_root():
@@ -217,11 +249,14 @@ async def health_check():
         db_status = "not configured"
         
         if db_pool:
-            async with db_pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT COUNT(*) FROM faucet_requests")
-                    total_requests = (await cur.fetchone())[0]
-            db_status = "connected"
+            try:
+                async with db_pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("SELECT COUNT(*) FROM faucet_requests")
+                        total_requests = (await cur.fetchone())[0]
+                db_status = "connected"
+            except Exception as e:
+                db_status = f"error: {str(e)}"
         
         return {
             "status": "healthy",
@@ -248,27 +283,33 @@ async def request_tokens(request: FaucetRequest):
     if request.current_age >= request.retirement_age:
         raise HTTPException(status_code=400, detail="Current age must be less than retirement age")
 
+    # Rate limiting check
     if db_pool:
-        async with db_pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("""
-                    SELECT created_at FROM faucet_requests 
-                    WHERE wallet_address = %s AND status = 'success'
-                    ORDER BY created_at DESC LIMIT 1
-                """, (wallet_address,))
-                result = await cur.fetchone()
-                
-                if result:
-                    last_request = result[0]
-                    time_diff = datetime.utcnow() - last_request
-                    hours_passed = time_diff.total_seconds() / 3600
+        try:
+            async with db_pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT created_at FROM faucet_requests 
+                        WHERE wallet_address = %s AND status = 'success'
+                        ORDER BY created_at DESC LIMIT 1
+                    """, (wallet_address,))
+                    result = await cur.fetchone()
                     
-                    if hours_passed < RATE_LIMIT_HOURS:
-                        hours_left = RATE_LIMIT_HOURS - hours_passed
-                        raise HTTPException(
-                            status_code=429, 
-                            detail=f"Rate limit exceeded. Please wait {hours_left:.1f} hours"
-                        )
+                    if result:
+                        last_request = result[0]
+                        time_diff = datetime.utcnow() - last_request
+                        hours_passed = time_diff.total_seconds() / 3600
+                        
+                        if hours_passed < RATE_LIMIT_HOURS:
+                            hours_left = RATE_LIMIT_HOURS - hours_passed
+                            raise HTTPException(
+                                status_code=429, 
+                                detail=f"Rate limit exceeded. Please wait {hours_left:.1f} hours"
+                            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"⚠️ Rate limit check failed: {e}")
 
     usdc_tx_hash = None
     eth_tx_hash = None
@@ -282,6 +323,7 @@ async def request_tokens(request: FaucetRequest):
         max_priority_fee = w3.to_wei(0.1, 'gwei')
         max_fee_per_gas = base_fee * 2 + max_priority_fee
 
+        # Send ETH
         try:
             eth_amount_wei = w3.to_wei(float(FAUCET_ETH_AMOUNT), 'ether')
             faucet_eth_balance = w3.eth.get_balance(faucet_account.address)
@@ -308,6 +350,7 @@ async def request_tokens(request: FaucetRequest):
             error_messages.append(f"ETH transfer failed: {str(e)}")
             print(f"❌ ETH error: {e}")
 
+        # Send USDC
         try:
             amount_wei = int(float(FAUCET_USDC_AMOUNT) * 10**decimals)
             nonce = w3.eth.get_transaction_count(faucet_account.address)
@@ -333,28 +376,30 @@ async def request_tokens(request: FaucetRequest):
 
         if not usdc_tx_hash and not eth_tx_hash:
             raise HTTPException(status_code=500, detail="; ".join(error_messages))
-
         status = 'success' if (usdc_tx_hash or eth_tx_hash) else 'failed'
         if db_pool:
-            async with db_pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("""
-                        INSERT INTO faucet_requests 
-                        (wallet_address, usdc_transaction_hash, eth_transaction_hash,
-                         usdc_amount_sent, eth_amount_sent, current_age, retirement_age,
-                         desired_monthly_payment, monthly_deposit, initial_amount, status, 
-                         error_message, contract_type)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        wallet_address, usdc_tx_hash, eth_tx_hash,
-                        float(FAUCET_USDC_AMOUNT) if usdc_tx_hash else None,
-                        float(FAUCET_ETH_AMOUNT) if eth_tx_hash else None,
-                        request.current_age, request.retirement_age,
-                        float(request.desired_monthly_payment), float(request.monthly_deposit),
-                        float(request.initial_amount), status,
-                        '; '.join(error_messages) if error_messages else None, 'mock'
-                    ))
-                    await conn.commit()
+            try:
+                async with db_pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("""
+                            INSERT INTO faucet_requests 
+                            (wallet_address, usdc_transaction_hash, eth_transaction_hash,
+                             usdc_amount_sent, eth_amount_sent, current_age, retirement_age,
+                             desired_monthly_payment, monthly_deposit, initial_amount, status, 
+                             error_message, contract_type)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            wallet_address, usdc_tx_hash, eth_tx_hash,
+                            float(FAUCET_USDC_AMOUNT) if usdc_tx_hash else None,
+                            float(FAUCET_ETH_AMOUNT) if eth_tx_hash else None,
+                            request.current_age, request.retirement_age,
+                            float(request.desired_monthly_payment), float(request.monthly_deposit),
+                            float(request.initial_amount), status,
+                            '; '.join(error_messages) if error_messages else None, 'mock'
+                        ))
+                        await conn.commit()
+            except Exception as e:
+                print(f"⚠️ Failed to save to database: {e}")
         
         message_parts = []
         if usdc_tx_hash:
@@ -379,19 +424,22 @@ async def request_tokens(request: FaucetRequest):
     except Exception as e:
         print(f"❌ Error: {e}")
         if db_pool:
-            async with db_pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("""
-                        INSERT INTO faucet_requests 
-                        (wallet_address, current_age, retirement_age, desired_monthly_payment,
-                         monthly_deposit, initial_amount, status, error_message, contract_type)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        wallet_address, request.current_age, request.retirement_age,
-                        float(request.desired_monthly_payment), float(request.monthly_deposit),
-                        float(request.initial_amount), 'failed', str(e), 'mock'
-                    ))
-                    await conn.commit()
+            try:
+                async with db_pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("""
+                            INSERT INTO faucet_requests 
+                            (wallet_address, current_age, retirement_age, desired_monthly_payment,
+                             monthly_deposit, initial_amount, status, error_message, contract_type)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            wallet_address, request.current_age, request.retirement_age,
+                            float(request.desired_monthly_payment), float(request.monthly_deposit),
+                            float(request.initial_amount), 'failed', str(e), 'mock'
+                        ))
+                        await conn.commit()
+            except Exception as db_error:
+                print(f"⚠️ Failed to save error to database: {db_error}")
         raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}")
 
 @app.get("/api/history/{wallet_address}")
@@ -402,20 +450,25 @@ async def get_wallet_history(wallet_address: str):
     if not w3.is_address(wallet_address):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
     wallet_address = w3.to_checksum_address(wallet_address)
-    async with db_pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                SELECT id, usdc_transaction_hash, eth_transaction_hash,
-                       usdc_amount_sent, eth_amount_sent, status, created_at, contract_type
-                FROM faucet_requests 
-                WHERE wallet_address = %s 
-                ORDER BY created_at DESC 
-                LIMIT 20
-            """, (wallet_address,))
-            
-            rows = await cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
-            return [dict(zip(columns, row)) for row in rows]
+    
+    try:
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT id, usdc_transaction_hash, eth_transaction_hash,
+                           usdc_amount_sent, eth_amount_sent, status, created_at, contract_type
+                    FROM faucet_requests 
+                    WHERE wallet_address = %s 
+                    ORDER BY created_at DESC 
+                    LIMIT 20
+                """, (wallet_address,))
+                
+                rows = await cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+                return [dict(zip(columns, row)) for row in rows]
+    except Exception as e:
+        print(f"❌ Error fetching history: {e}")
+        return []
 
 @app.get("/api/stats")
 async def get_stats():
@@ -429,21 +482,32 @@ async def get_stats():
             "unique_wallets": 0
         }
     
-    async with db_pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                SELECT 
-                    COUNT(*) as total_requests,
-                    COUNT(CASE WHEN status = 'success' THEN 1 END) as successful,
-                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-                    COALESCE(SUM(CASE WHEN status = 'success' THEN usdc_amount_sent ELSE 0 END), 0) as total_usdc,
-                    COALESCE(SUM(CASE WHEN status = 'success' THEN eth_amount_sent ELSE 0 END), 0) as total_eth,
-                    COUNT(DISTINCT wallet_address) as unique_wallets
-                FROM faucet_requests
-            """)
-            stats = await cur.fetchone()
-            columns = [desc[0] for desc in cur.description]
-            return dict(zip(columns, stats))
+    try:
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT 
+                        COUNT(*) as total_requests,
+                        COUNT(CASE WHEN status = 'success' THEN 1 END) as successful,
+                        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                        COALESCE(SUM(CASE WHEN status = 'success' THEN usdc_amount_sent ELSE 0 END), 0) as total_usdc,
+                        COALESCE(SUM(CASE WHEN status = 'success' THEN eth_amount_sent ELSE 0 END), 0) as total_eth,
+                        COUNT(DISTINCT wallet_address) as unique_wallets
+                    FROM faucet_requests
+                """)
+                stats = await cur.fetchone()
+                columns = [desc[0] for desc in cur.description]
+                return dict(zip(columns, stats))
+    except Exception as e:
+        print(f"❌ Error fetching stats: {e}")
+        return {
+            "total_requests": 0,
+            "successful": 0,
+            "failed": 0,
+            "total_usdc": 0,
+            "total_eth": 0,
+            "unique_wallets": 0
+        }
 
 @app.get("/api/config")
 async def get_config():
