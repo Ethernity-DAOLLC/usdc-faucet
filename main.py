@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 from web3 import Web3
 import asyncio
+import time
 
 load_dotenv()
 
@@ -155,9 +156,10 @@ async def startup():
             
             async with db_pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    # Crear tabla principal
+                    print("🗑️ Dropping old table if exists...")
+                    await cur.execute("DROP TABLE IF EXISTS faucet_requests CASCADE;")
                     await cur.execute("""
-                        CREATE TABLE IF NOT EXISTS faucet_requests (
+                        CREATE TABLE faucet_requests (
                             id SERIAL PRIMARY KEY,
                             wallet_address VARCHAR(42) NOT NULL,
                             usdc_transaction_hash VARCHAR(66),
@@ -176,22 +178,22 @@ async def startup():
                             ip_address VARCHAR(45)
                         );
                     """)
-                    print("✅ Table faucet_requests created/verified")
+                    print("✅ Table faucet_requests created")
                     
                     # Crear índices
                     await cur.execute("""
-                        CREATE INDEX IF NOT EXISTS idx_wallet_address 
+                        CREATE INDEX idx_wallet_address 
                         ON faucet_requests(wallet_address);
                     """)
                     await cur.execute("""
-                        CREATE INDEX IF NOT EXISTS idx_wallet_status 
+                        CREATE INDEX idx_wallet_status 
                         ON faucet_requests(status);
                     """)
                     await cur.execute("""
-                        CREATE INDEX IF NOT EXISTS idx_created_at 
+                        CREATE INDEX idx_created_at 
                         ON faucet_requests(created_at);
                     """)
-                    print("✅ Indexes created/verified")
+                    print("✅ Indexes created")
                     
                     await conn.commit()
                     print("✅ Database schema ready")
@@ -202,8 +204,6 @@ async def startup():
             db_pool = None
     else:
         print("⚠️ No DATABASE_URL - running without database")
-    
-    # Verificar conexión blockchain
     try:
         block_number = w3.eth.block_number
         print(f"✅ Blockchain connected - Block: {block_number}")
@@ -244,7 +244,6 @@ async def health_check():
         decimals = usdc_contract.functions.decimals().call()
         symbol = usdc_contract.functions.symbol().call()
         eth_balance = w3.eth.get_balance(faucet_address)
-        
         total_requests = 0
         db_status = "not configured"
         
@@ -283,7 +282,6 @@ async def request_tokens(request: FaucetRequest):
     if request.current_age >= request.retirement_age:
         raise HTTPException(status_code=400, detail="Current age must be less than retirement age")
 
-    # Rate limiting check
     if db_pool:
         try:
             async with db_pool.connection() as conn:
@@ -318,58 +316,86 @@ async def request_tokens(request: FaucetRequest):
     try:
         faucet_account = w3.eth.account.from_key(PRIVATE_KEY)
         decimals = usdc_contract.functions.decimals().call()
-        latest_block = w3.eth.get_block('latest')
-        base_fee = latest_block['baseFeePerGas']
-        max_priority_fee = w3.to_wei(0.1, 'gwei')
-        max_fee_per_gas = base_fee * 2 + max_priority_fee
+        async def get_gas_params_with_retry(max_retries=3):
+            for attempt in range(max_retries):
+                try:
+                    latest_block = w3.eth.get_block('latest')
+                    base_fee = latest_block['baseFeePerGas']
+                    max_priority_fee = w3.to_wei(0.1, 'gwei')
+                    max_fee_per_gas = base_fee * 2 + max_priority_fee
+                    return max_fee_per_gas, max_priority_fee
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1 * (attempt + 1))  
+                        continue
+                    raise
+        
+        max_fee_per_gas, max_priority_fee = await get_gas_params_with_retry()
 
-        # Send ETH
         try:
             eth_amount_wei = w3.to_wei(float(FAUCET_ETH_AMOUNT), 'ether')
             faucet_eth_balance = w3.eth.get_balance(faucet_account.address)
             
-            if faucet_eth_balance >= eth_amount_wei + w3.to_wei(0.0001, 'ether'): 
-                nonce = w3.eth.get_transaction_count(faucet_account.address)
-                eth_transaction = {
-                    'nonce': nonce,
-                    'to': wallet_address,
-                    'value': eth_amount_wei,
-                    'gas': 210000,
-                    'maxFeePerGas': max_fee_per_gas,
-                    'maxPriorityFeePerGas': max_priority_fee,
-                    'chainId': w3.eth.chain_id
-                }
-                signed_eth_txn = w3.eth.account.sign_transaction(eth_transaction, PRIVATE_KEY)
-                eth_tx_hash_bytes = w3.eth.send_raw_transaction(signed_eth_txn.raw_transaction)
-                eth_tx_hash = eth_tx_hash_bytes.hex()
-                print(f"✅ ETH sent: {eth_tx_hash}")
-                await asyncio.sleep(2)
+            if faucet_eth_balance >= eth_amount_wei + w3.to_wei(0.0001, 'ether'):
+                for attempt in range(3):
+                    try:
+                        nonce = w3.eth.get_transaction_count(faucet_account.address)
+                        eth_transaction = {
+                            'nonce': nonce,
+                            'to': wallet_address,
+                            'value': eth_amount_wei,
+                            'gas': 210000,
+                            'maxFeePerGas': max_fee_per_gas,
+                            'maxPriorityFeePerGas': max_priority_fee,
+                            'chainId': w3.eth.chain_id
+                        }
+                        signed_eth_txn = w3.eth.account.sign_transaction(eth_transaction, PRIVATE_KEY)
+                        eth_tx_hash_bytes = w3.eth.send_raw_transaction(signed_eth_txn.raw_transaction)
+                        eth_tx_hash = eth_tx_hash_bytes.hex()
+                        print(f"✅ ETH sent: {eth_tx_hash}")
+                        await asyncio.sleep(2)
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            print(f"⚠️ ETH transfer attempt {attempt + 1} failed, retrying...")
+                            await asyncio.sleep(2)
+                        else:
+                            raise
             else:
                 error_messages.append("Insufficient ETH balance in faucet")
         except Exception as e:
             error_messages.append(f"ETH transfer failed: {str(e)}")
             print(f"❌ ETH error: {e}")
 
-        # Send USDC
         try:
             amount_wei = int(float(FAUCET_USDC_AMOUNT) * 10**decimals)
-            nonce = w3.eth.get_transaction_count(faucet_account.address)
             
-            usdc_transaction = usdc_contract.functions.transfer(
-                wallet_address, amount_wei
-            ).build_transaction({
-                'from': faucet_account.address,
-                'nonce': nonce,
-                'gas': 1000000,
-                'maxFeePerGas': max_fee_per_gas,
-                'maxPriorityFeePerGas': max_priority_fee,
-                'chainId': w3.eth.chain_id
-            })
-            
-            signed_usdc_txn = w3.eth.account.sign_transaction(usdc_transaction, PRIVATE_KEY)
-            usdc_tx_hash_bytes = w3.eth.send_raw_transaction(signed_usdc_txn.raw_transaction)
-            usdc_tx_hash = usdc_tx_hash_bytes.hex()
-            print(f"✅ USDC sent: {usdc_tx_hash}")
+            for attempt in range(3):
+                try:
+                    nonce = w3.eth.get_transaction_count(faucet_account.address)
+                    
+                    usdc_transaction = usdc_contract.functions.transfer(
+                        wallet_address, amount_wei
+                    ).build_transaction({
+                        'from': faucet_account.address,
+                        'nonce': nonce,
+                        'gas': 1000000,
+                        'maxFeePerGas': max_fee_per_gas,
+                        'maxPriorityFeePerGas': max_priority_fee,
+                        'chainId': w3.eth.chain_id
+                    })
+                    
+                    signed_usdc_txn = w3.eth.account.sign_transaction(usdc_transaction, PRIVATE_KEY)
+                    usdc_tx_hash_bytes = w3.eth.send_raw_transaction(signed_usdc_txn.raw_transaction)
+                    usdc_tx_hash = usdc_tx_hash_bytes.hex()
+                    print(f"✅ USDC sent: {usdc_tx_hash}")
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        print(f"⚠️ USDC transfer attempt {attempt + 1} failed, retrying...")
+                        await asyncio.sleep(2)
+                    else:
+                        raise
         except Exception as e:
             error_messages.append(f"USDC transfer failed: {str(e)}")
             print(f"❌ USDC error: {e}")
