@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from web3 import Web3
 
 sys.path.append(str(Path(__file__).parent.parent))
-
 load_dotenv()
 
 def deploy_mock_usdc():
@@ -32,7 +31,6 @@ def deploy_mock_usdc():
     
     try:
         import vyper
-
         compiled = vyper.compile_code(
             contract_source,
             output_formats=["abi", "bytecode", "layout"]
